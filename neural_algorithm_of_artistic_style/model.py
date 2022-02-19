@@ -1,4 +1,5 @@
 import tensorflow as tf
+from utils import preprocess_image
 
 
 def gram_matrix(input_tensor):
@@ -7,14 +8,16 @@ def gram_matrix(input_tensor):
     :param input_tensor (tensor): feature map from intermediate layers
     :return:
     '''
-    result = tf.linalg.einsum('bijc, bijd -> bcd', input_tensor, input_tensor)
+    gram = tf.linalg.einsum('bijc, bijd -> bcd', input_tensor, input_tensor)
     input_shape = tf.shape(input_tensor)
     num_locations = tf.cast(input_shape[1] * input_shape[2], tf.float32)
-    return result / num_locations
+    scaled_gram = gram / num_locations
+
+    return scaled_gram
 
 
 # Define model
-def vgg_layers(layer_names):
+def vgg_model(layer_names):
     '''
     Loads pretrained vgg model and uses intermediate layers as representation of each contents and styles of images
     :param layer_names (list): list of layers for intermediate layers
@@ -25,17 +28,19 @@ def vgg_layers(layer_names):
 
     outputs = [vgg.get_layer(layer).output for layer in layer_names]
 
-    model = tf.keras.Model(inputs=vgg.inputs, outputs=outputs)
+    model = tf.keras.Model(inputs=vgg.input, outputs=outputs)
+
     return model
 
 
 class StyleContentModel(tf.keras.models.Model):
     '''
-    Extracts tensors for style and content
+    Extracts style and content features
     '''
     def __init__(self, style_layers, content_layers):
         super(StyleContentModel, self).__init__()
-        self.vgg = vgg_layers(style_layers + content_layers)
+
+        self.vgg = vgg_model(style_layers + content_layers)
         self.style_layers = style_layers
         self.content_layers = content_layers
         self.num_style_layers = len(style_layers)
@@ -43,15 +48,14 @@ class StyleContentModel(tf.keras.models.Model):
 
     def __call__(self, inputs):
         '''
-        :param inputs (tensor): takes preprocessed inputs
+        :param inputs (tensor):
         :return:
         '''
-        outputs = self.vgg(inputs)
-        style_outputs = outputs[:self.num_style_layers]
-        content_outputs = outputs[self.num_style_layers:]
+        preprocessed_input = preprocess_image(inputs)
+        outputs = self.vgg(preprocessed_input)
+        style_features = outputs[:self.num_style_layers]
+        content_features = outputs[self.num_style_layers:]
 
-        style_features = [gram_matrix(style_output) for style_output in style_outputs]
-        content_features = [gram_matrix(content_output) for content_output in content_outputs]
+        gram_style_features = [gram_matrix(style_feature) for style_feature in style_features]
 
-        return style_features, content_features
-
+        return gram_style_features, content_features
